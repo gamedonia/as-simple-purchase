@@ -1,0 +1,216 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:View xmlns:fx="http://ns.adobe.com/mxml/2009" 
+		xmlns:s="library://ns.adobe.com/flex/spark" title="purchaseView" actionBarVisible="false" creationComplete="initView()" xmlns:mx="library://ns.adobe.com/flex/mx" xmlns:components="components.*">
+	<fx:Declarations>
+		<!-- Place non-visual elements (e.g., services, value objects) here -->
+		<s:Animate id="animateEffect"
+				   target="{progressBar}" repeatCount="1" disableLayout="true">
+			<s:motionPaths>
+				<s:SimpleMotionPath property="value" valueFrom="{progressBar.value}" valueTo="{this._currentGas}"/>
+			</s:motionPaths>
+		</s:Animate>
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+			import com.gamedonia.sdk.Credentials;
+			import com.gamedonia.sdk.GDOptions;
+			import com.gamedonia.sdk.GDUser;
+			import com.gamedonia.sdk.GDUserProfile;
+			import com.gamedonia.sdk.Gamedonia;
+			import com.gamedonia.sdk.GamedoniaDevice;
+			import com.gamedonia.sdk.GamedoniaInAppPurchases;
+			import com.gamedonia.sdk.GamedoniaStoreEvent;
+			import com.gamedonia.sdk.GamedoniaUsers;
+			import com.gamedonia.sdk.inapppurchases.GamedoniaStore;
+			import com.gamedonia.sdk.openudid.OpenUDID;
+			import com.gamedonia.sdk.pushnotifications.GamedoniaPushNotifications;
+			
+			import components.popUpComponent;
+			
+			import spark.effects.Animate;
+			import spark.effects.animation.MotionPath;
+			
+			private static const API_KEY:String = "";
+			private static const SECRET:String = "";
+			
+			public static var popup:popUpComponent = new popUpComponent();
+			
+			private static var _openUDID:OpenUDID;
+			private static var GAS_DRIVE_CONSUMPTION_REFILL:Number = 0.25;
+			
+			[Bindable]
+			protected var _currentGas:Number = 0.5;
+			
+			
+			protected function initView():void {
+				
+				
+				// Set constraints
+				var left_constraint:Number = this.parent.width - this.parent.width*0.78;
+				
+				car_img.setConstraintValue("left", left_constraint);
+				gas_label.setConstraintValue("left", this.parent.width - this.parent.width*0.46);
+				progressBar.setConstraintValue("left", left_constraint);
+				drive_button.setConstraintValue("left", left_constraint);
+				buygas_button.setConstraintValue("left", left_constraint);
+				console_label.setConstraintValue("left", left_constraint);
+				textArea.setConstraintValue("left", left_constraint);
+				
+				progressBar.value = 0.5;
+				
+				var options:GDOptions = new GDOptions();
+				options.inAppPurchases = true;
+				
+				// Initialize
+				if ( API_KEY == "" || SECRET == "" ) {
+					
+					popup.show ( "Missing Api Key/Secret.\nCheck the README.txt." );
+					
+				} else {
+					
+					Gamedonia.initializeWithOptions( API_KEY, SECRET, "http://api.gamedonia.com", "v1", options );
+					
+					GamedoniaInAppPurchases.instance.addEventListener(GamedoniaStoreEvent.PRODUCTS_REQUESTED, onProductsRequested);
+					GamedoniaInAppPurchases.instance.addEventListener(GamedoniaStoreEvent.PRODUCT_PURCHASED_KO, onProductPurchasedKO);
+					GamedoniaInAppPurchases.instance.addEventListener(GamedoniaStoreEvent.PRODUCT_PURCHASED_OK, onProductPurchasedOK);
+					
+					_openUDID = OpenUDID.instance;
+					var udid:String = _openUDID.getValue();
+					
+					var credentials:Credentials = new Credentials();
+					credentials.open_udid = udid;
+					
+					var user:GDUser = new GDUser();
+					user.credentials = credentials;
+					
+					GamedoniaUsers.createUser( user, function ( create_success:Boolean ):void {
+						
+						GamedoniaUsers.loginUserWithOpenUDID( function ( login_success:Boolean ):void {
+							
+							printText( "Starting session with Gamedonia..." );
+							
+							if ( login_success ) {
+								
+								processLogin();
+								
+							} else {
+								
+								trace( "Login failed." );
+							}
+						});
+					});
+				
+				}
+			}
+			
+			private function processLogin():void {
+				
+				GamedoniaUsers.getMe( function( success:Boolean, me:GDUserProfile ):void {
+					
+					if ( success ) {
+						
+						var uid:String;
+						uid = me._id;
+						printText("Session started successfully\nuid: "+uid);
+						
+						var productsList:Array = new Array( "gas" );
+						GamedoniaInAppPurchases.instance.requestProducts(productsList);
+						
+					} else {
+						
+						trace( "Get me failed." );
+					}
+				});
+				
+			}
+			
+			protected function updateGas( val:Number ):void {
+				
+				var result:Number = _currentGas + val;
+				
+				if ( result <= 0.0 ) {
+					
+					_currentGas = 0.0;
+					
+				} else if ( result >= 1.0 ) {
+					
+					_currentGas = 1.0;
+					
+				} else {
+					
+					_currentGas = result;
+				}
+				
+				animateEffect.play();
+				
+			}
+			
+			protected function drive_clickHandler():void {
+				
+				if ( _currentGas <= 0.0 ) {
+					
+					printText( "Out of GAS! Purchase more please!" );
+					
+				} else {
+					
+					updateGas( -GAS_DRIVE_CONSUMPTION_REFILL );
+				}
+			}
+			
+			protected function buyGas_clickHandler():void {
+				
+				if( !Capabilities.isDebugger) {
+					
+					if ( _currentGas < 1.0 ) {
+						
+						GamedoniaInAppPurchases.instance.buyProduct( "gas" );
+						
+					} else {
+						
+						printText( "Already full of gas! Drive to spend some." );
+					}
+				} else {
+					popup.show( "Purchases are disabled\n in emulator mode.\n Try them on a device!" );
+				}
+			}
+
+			protected function onProductsRequested( e:GamedoniaStoreEvent ):void {
+				trace ( e.products);
+			}
+			
+			protected function onProductPurchasedKO( e:GamedoniaStoreEvent ):void {
+				trace ( e.type);
+			}
+			
+			protected function onProductPurchasedOK( e:GamedoniaStoreEvent ):void {
+				
+				updateGas( GAS_DRIVE_CONSUMPTION_REFILL );
+				printText( "GAS refilled!" );
+			}
+			
+			protected function printText( s:String ):void {
+				
+				textArea.appendText( s + "\n\n" );
+			}
+			
+		]]>
+	</fx:Script>
+	<s:BitmapImage source="@Embed('../assets/background@2x.png')" 
+				   left="0" right="0"  
+				   width="100%" height="100%" 
+				   />
+	<s:Image id="car_img" y="10" left="70" right="10" height="62" source="@Embed('../assets/car.png')"/>
+	<s:Label id="gas_label" x="172" y="106" fontFamily="Arial" fontSize="15" fontWeight="bold" text="GAS"/>
+	<components:ProgressBar id="progressBar" y="78" left="71" right="9"
+							skinClass="skins.progressBarSkin"/>
+	<s:Button id="drive_button" y="128" left="71" right="9" label="Drive" fontFamily="Arial" fontSize="15"
+			  fontWeight="bold" chromeColor="#6eac2b" color="#FFFFFF" textShadowAlpha="0" click="drive_clickHandler()"/>
+	<s:Button id="buygas_button" y="179" left="71" right="9" label="Buy Gas" chromeColor="#6eac2b"
+			  click="buyGas_clickHandler()" color="#FFFFFF" fontFamily="Arial" fontSize="15"
+			  textShadowAlpha="0"/>
+	<s:Label id="console_label" y="230" left="71" fontFamily="Arial" fontSize="15" fontWeight="bold"
+			 text="Console Log:"/>
+	<s:TextArea id="textArea" right="10" top="253" bottom="10" width="239" borderVisible="false"
+				contentBackgroundColor="#ffffff" editable="false" fontFamily="Arial"
+				fontWeight="bold"/>
+</s:View>
